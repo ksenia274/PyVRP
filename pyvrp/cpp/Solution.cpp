@@ -3,6 +3,7 @@
 #include "DynamicBitset.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <numeric>
 
@@ -53,7 +54,7 @@ size_t Solution::numTrips() const
 {
     return std::accumulate(routes_.begin(),
                            routes_.end(),
-                           0,
+                           size_t{0},
                            [](size_t count, auto const &route)
                            { return count + route.numTrips(); });
 }
@@ -113,6 +114,33 @@ Cost Solution::prizes() const { return prizes_; }
 Cost Solution::uncollectedPrizes() const { return uncollectedPrizes_; }
 
 Duration Solution::timeWarp() const { return timeWarp_; }
+
+double Solution::routeBalance() const
+{
+    if (routes_.size() <= 1)
+        return 0.0;
+
+    double mean = static_cast<double>(numClients_)
+                  / static_cast<double>(routes_.size());
+
+    if (mean == 0.0)
+        return 0.0;
+
+    double variance = 0.0;
+    for (auto const &route : routes_)
+    {
+        double diff = static_cast<double>(route.numClients()) - mean;
+        variance += diff * diff;
+    }
+    variance /= static_cast<double>(routes_.size());
+
+    return std::sqrt(variance) / mean;
+}
+
+double Solution::timeWindowViolation() const
+{
+    return static_cast<double>(timeWarp_.get());
+}
 
 bool Solution::operator==(Solution const &other) const
 {
@@ -327,6 +355,21 @@ Cost pyvrp::CostEvaluator::penalisedCost(Solution const &solution) const
     Cost cost = solution.uncollectedPrizes();
     for (auto const &route : solution.routes())
         cost += penalisedCost(route);
+
+    // Custom objective terms — all zero by default (backward compatible).
+    auto const [vcw, rbw, dw, tw] = getWeights();
+
+    if (vcw > 0.0)
+        cost += static_cast<Cost>(vcw * static_cast<double>(solution.numRoutes()));
+
+    if (rbw > 0.0)
+        cost += static_cast<Cost>(rbw * solution.routeBalance());
+
+    if (dw > 0.0)
+        cost += static_cast<Cost>(dw * static_cast<double>(solution.distance().get()));
+
+    if (tw > 0.0)
+        cost += static_cast<Cost>(tw * static_cast<double>(solution.duration().get()));
 
     return cost;
 }

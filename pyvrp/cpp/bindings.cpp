@@ -953,6 +953,12 @@ PYBIND11_MODULE(_pyvrp, m)
         .def("uncollected_prizes",
              &Solution::uncollectedPrizes,
              DOC(pyvrp, Solution, uncollectedPrizes))
+        .def("route_balance",
+             &Solution::routeBalance,
+             DOC(pyvrp, Solution, routeBalance))
+        .def("time_window_violation",
+             &Solution::timeWindowViolation,
+             DOC(pyvrp, Solution, timeWindowViolation))
         .def("__copy__", [](Solution const &sol) { return Solution(sol); })
         .def(
             "__deepcopy__",
@@ -1011,10 +1017,15 @@ PYBIND11_MODULE(_pyvrp, m)
              });
 
     py::class_<CostEvaluator>(m, "CostEvaluator", DOC(pyvrp, CostEvaluator))
-        .def(py::init<std::vector<double>, double, double>(),
+        .def(py::init<std::vector<double>, double, double, double, double,
+                      double, double>(),
              py::arg("load_penalties"),
              py::arg("tw_penalty"),
-             py::arg("dist_penalty"))
+             py::arg("dist_penalty"),
+             py::arg("vehicle_count_weight") = 0.0,
+             py::arg("route_balance_weight") = 0.0,
+             py::arg("dist_weight") = 0.0,
+             py::arg("time_weight") = 0.0)
         .def("load_penalty",
              &CostEvaluator::loadPenalty,
              py::arg("load"),
@@ -1037,7 +1048,17 @@ PYBIND11_MODULE(_pyvrp, m)
         .def("cost",
              &CostEvaluator::cost<Solution>,
              py::arg("solution"),
-             DOC(pyvrp, CostEvaluator, cost));
+             DOC(pyvrp, CostEvaluator, cost))
+        .def("set_weights",
+             &CostEvaluator::setWeights,
+             py::arg("vehicle_count_weight"),
+             py::arg("route_balance_weight"),
+             py::arg("dist_weight"),
+             py::arg("time_weight"),
+             DOC(pyvrp, CostEvaluator, setWeights))
+        .def("get_weights",
+             &CostEvaluator::getWeights,
+             DOC(pyvrp, CostEvaluator, getWeights));
 
     py::class_<LoadSegment>(m, "LoadSegment", DOC(pyvrp, LoadSegment))
         .def(py::init<pyvrp::Load, pyvrp::Load, pyvrp::Load, pyvrp::Load>(),

@@ -20,8 +20,9 @@ namespace
 // std::string, which are much larger objects.
 static char *duplicate(char const *src)
 {
-    char *dst = new char[std::strlen(src) + 1];  // space for src + null
-    std::strcpy(dst, src);
+    auto const len = std::strlen(src) + 1;  // space for src + null
+    char *dst = new char[len];
+    std::memcpy(dst, src, len);
     return dst;
 }
 
@@ -758,8 +759,8 @@ ProblemData::ProblemData(std::vector<Location> locations,
       groups_(std::move(groups)),
       numVehicles_(std::accumulate(vehicleTypes_.begin(),
                                    vehicleTypes_.end(),
-                                   0,
-                                   [](auto sum, VehicleType const &type)
+                                   size_t{0},
+                                   [](size_t sum, VehicleType const &type)
                                    { return sum + type.numAvailable; })),
       numLoadDimensions_(
           clients_.empty()

@@ -56,6 +56,13 @@ class CostEvaluator
     double twPenalty_;
     double distPenalty_;
 
+    // Custom objective weights (additive terms on top of base cost).
+    // All default to 0.0 so existing cost computation is unchanged.
+    double vehicleCountWeight_ = 0.0;  // penalty per route/vehicle used
+    double routeBalanceWeight_ = 0.0;  // penalty for load imbalance (CV)
+    double distWeight_ = 0.0;          // extra cost per unit of raw distance
+    double timeWeight_ = 0.0;          // extra cost per unit of raw duration
+
     /**
      * Computes the cost penalty incurred from the given excess loads. This is
      * a convenient shorthand for calling ``loadPenalty`` for each dimension.
@@ -66,7 +73,24 @@ class CostEvaluator
 public:
     CostEvaluator(std::vector<double> loadPenalties,
                   double twPenalty,
-                  double distPenalty);
+                  double distPenalty,
+                  double vehicleCountWeight = 0.0,
+                  double routeBalanceWeight = 0.0,
+                  double distWeight = 0.0,
+                  double timeWeight = 0.0);
+
+    /**
+     * Sets the custom objective weights. All must be >= 0.
+     */
+    void setWeights(double vehicleCountWeight,
+                    double routeBalanceWeight,
+                    double distWeight,
+                    double timeWeight);
+
+    /**
+     * Returns (vehicleCountWeight, routeBalanceWeight, distWeight, timeWeight).
+     */
+    [[nodiscard]] std::tuple<double, double, double, double> getWeights() const;
 
     /**
      * Computes the total excess load penalty for the given load and vehicle

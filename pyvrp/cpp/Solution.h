@@ -207,6 +207,17 @@ public:
      */
     [[nodiscard]] Duration timeWarp() const;
 
+    /**
+     * Coefficient of variation (std / mean) of clients per route. Returns 0.0
+     * when there is at most one route or all routes are equal-sized.
+     */
+    [[nodiscard]] double routeBalance() const;
+
+    /**
+     * Total time warp over all routes, as a double.
+     */
+    [[nodiscard]] double timeWindowViolation() const;
+
     bool operator==(Solution const &other) const;
 
     Solution(Solution const &other) = default;

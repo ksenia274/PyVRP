@@ -18,6 +18,23 @@ project(
 )
 
 compiler = meson.get_compiler('cpp')
+
+# MSVC: disable C4458 (name hiding) and C4267 (size_t narrowing) that appear
+# in pre-existing code; the project is primarily developed with GCC/Clang.
+if compiler.get_id() == 'msvc'
+    add_project_arguments(
+        '/wd4267',  # size_t to smaller type narrowing
+        '/wd4456',  # local variable hides outer local
+        '/wd4457',  # local variable hides function parameter
+        '/wd4458',  # local variable hides class member
+        '/wd4459',  # local variable hides global
+        '/wd4100',  # unreferenced formal parameter (in Python/pybind11 headers)
+        '/wd4702',  # unreachable code
+        '/wd4996',  # deprecated CRT functions (strcpy etc.)
+        language: 'cpp'
+    )
+endif
+
 if compiler.has_argument('-Wno-dangling-reference')
     # This is a new diagnostic in GCC 13 and up, but it is a bit buggy right
     # now and issues false positives for some of our code. See #656 and #657
