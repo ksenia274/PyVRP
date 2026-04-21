@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import fmean
+from typing import TYPE_CHECKING
 from warnings import warn
 
 import numpy as np
 
 from pyvrp._pyvrp import CostEvaluator, ProblemData, Solution
 from pyvrp.exceptions import PenaltyBoundWarning
+
+if TYPE_CHECKING:
+    from pyvrp.adaptive_objective import ObjectiveWeights
 
 
 @dataclass
@@ -168,6 +172,13 @@ class PenaltyManager:
             [] for _ in range(len(self._penalties))
         ]
 
+        self._custom_weights: tuple[float, float, float, float] = (
+            0.0, 0.0, 0.0, 0.0
+        )
+
+    def set_custom_weights(self, weights: "ObjectiveWeights") -> None:
+        self._custom_weights = weights.as_tuple()
+
     def penalties(self) -> tuple[list[float], float, float]:
         """
         Returns the current penalty values.
@@ -237,7 +248,7 @@ class PenaltyManager:
         Get a cost evaluator using the current penalty values.
         """
         *loads, tw, dist = self._penalties
-        return CostEvaluator(loads, tw, dist)
+        return CostEvaluator(loads, tw, dist, *self._custom_weights)
 
     def max_cost_evaluator(self) -> CostEvaluator:
         """

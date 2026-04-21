@@ -30,8 +30,10 @@ from ._pyvrp import Route as Route
 from ._pyvrp import ScheduledActivity as ScheduledActivity
 from ._pyvrp import Solution as Solution
 from ._pyvrp import VehicleType as VehicleType
-from .adaptive_objective import AdaptiveAdjustment as AdaptiveAdjustment
 from .adaptive_objective import AdaptiveObjective as AdaptiveObjective
+from .adaptive_objective import (
+    FairnessSignalAdjustment as FairnessSignalAdjustment,
+)
 from .adaptive_objective import IterationMetrics as IterationMetrics
 from .adaptive_objective import LinearDecay as LinearDecay
 from .adaptive_objective import (

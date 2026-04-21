@@ -10,7 +10,7 @@ from pyvrp.RingBuffer import RingBuffer
 from pyvrp.Statistics import Statistics
 
 if TYPE_CHECKING:
-    from pyvrp.PenaltyManager import PenaltyManager
+    from pyvrp.PenaltyManager import PenaltyManager as PenaltyManager
     from pyvrp._pyvrp import (
         CostEvaluator,
         ProblemData,
@@ -26,6 +26,12 @@ class IteratedLocalSearchCallbacks:
     local search algorithm. These callbacks allow user-space code to observe
     search progress.
     """
+
+    def on_setup(self, pm: "PenaltyManager"):
+        """
+        Called once before the search starts, with the penalty manager.
+        """
+        pass
 
     def on_start(self, initial: Solution):
         """
@@ -189,6 +195,7 @@ class IteratedLocalSearch:
         iters = iters_no_improvement = 0
         best = curr = self._init
 
+        callbacks.on_setup(self._pm)
         callbacks.on_start(self._init)
 
         cost_eval = self._pm.cost_evaluator()

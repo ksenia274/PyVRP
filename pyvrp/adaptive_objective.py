@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
     from pyvrp._pyvrp import CostEvaluator, Solution
     from pyvrp.IteratedLocalSearch import IteratedLocalSearchCallbacks
+    from pyvrp.PenaltyManager import PenaltyManager
 
 
 @dataclass
@@ -41,7 +43,7 @@ class ObjectiveWeights:
     def as_tuple(self) -> tuple[float, float, float, float]:
         return (self.vehicle_count, self.route_balance, self.dist, self.time)
 
-    def apply_to(self, cost_evaluator: CostEvaluator) -> None:
+    def apply_to(self, cost_evaluator: "CostEvaluator") -> None:
         cost_evaluator.set_weights(
             self.vehicle_count,
             self.route_balance,
@@ -64,6 +66,10 @@ class IterationMetrics:
     route_balance: float
     time_window_violation: float
     weights: ObjectiveWeights
+
+    per_route_clients: list[int] = field(default_factory=list)
+    per_route_distances: list[float] = field(default_factory=list)
+    per_route_loads: list[list[float]] = field(default_factory=list)
 
 
 class AdaptationStrategy(ABC):
@@ -106,63 +112,6 @@ class LinearDecay(AdaptationStrategy):
             route_balance=_d(weights.route_balance),
             dist=_d(weights.dist),
             time=_d(weights.time),
-        )
-
-
-class AdaptiveAdjustment(AdaptationStrategy):
-    """
-    Increases weights when the rolling feasibility rate is below
-    ``target_feasibility``; decreases them otherwise.
-
-    Parameters
-    ----------
-    target_feasibility
-        Target fraction of feasible candidates. Default 0.5.
-    increase_factor
-        Multiplier when below target (must be > 1). Default 1.1.
-    decrease_factor
-        Multiplier when at/above target (must be in (0, 1)). Default 0.9.
-    min_weight
-        Weight lower bound. Default 0.0.
-    max_weight
-        Weight upper bound. Default 1e9.
-    """
-
-    def __init__(
-        self,
-        target_feasibility: float = 0.5,
-        increase_factor: float = 1.1,
-        decrease_factor: float = 0.9,
-        min_weight: float = 0.0,
-        max_weight: float = 1e9,
-    ):
-        if not (0 <= target_feasibility <= 1):
-            raise ValueError("target_feasibility must be in [0, 1].")
-        if increase_factor <= 1:
-            raise ValueError("increase_factor must be > 1.")
-        if not (0 < decrease_factor < 1):
-            raise ValueError("decrease_factor must be in (0, 1).")
-        self._target = target_feasibility
-        self._inc = increase_factor
-        self._dec = decrease_factor
-        self._min = min_weight
-        self._max = max_weight
-
-    def update(
-        self, weights: ObjectiveWeights, metrics: IterationMetrics
-    ) -> ObjectiveWeights:
-        factor = (
-            self._inc if metrics.feasibility_rate < self._target else self._dec
-        )
-
-        def _adj(v: float) -> float:
-            return max(self._min, min(v * factor, self._max))
-
-        return ObjectiveWeights(
-            vehicle_count=_adj(weights.vehicle_count),
-            route_balance=_adj(weights.route_balance),
-            dist=_adj(weights.dist),
-            time=_adj(weights.time),
         )
 
 
@@ -228,6 +177,83 @@ class MultiObjectiveScalarization(AdaptationStrategy):
         )
 
 
+class FairnessSignalAdjustment(AdaptationStrategy):
+    """
+    Boosts route_balance weight when fairness is stable and cost is not
+    growing; decays all weights when cost growth exceeds cost_budget.
+    """
+
+    def __init__(
+        self,
+        epsilon: float = 0.01,
+        cost_budget: float = 0.0,
+        boost_factor: float = 1.1,
+        decay_factor: float = 0.9,
+        window: int = 10,
+        min_weight: float = 0.0,
+        max_weight: float = 1e9,
+    ):
+        if epsilon < 0:
+            raise ValueError("epsilon must be >= 0.")
+        if boost_factor <= 1:
+            raise ValueError("boost_factor must be > 1.")
+        if not (0 < decay_factor < 1):
+            raise ValueError("decay_factor must be in (0, 1).")
+        if window < 2:
+            raise ValueError("window must be >= 2.")
+
+        self._epsilon = epsilon
+        self._cost_budget = cost_budget
+        self._boost = boost_factor
+        self._decay = decay_factor
+        self._window = window
+        self._min = min_weight
+        self._max = max_weight
+
+        self._balance_buf: deque[float] = deque(maxlen=window)
+        self._cost_buf: deque[int] = deque(maxlen=window)
+
+    def _clip(self, v: float) -> float:
+        return max(self._min, min(v, self._max))
+
+    def update(
+        self, weights: ObjectiveWeights, metrics: IterationMetrics
+    ) -> ObjectiveWeights:
+        self._balance_buf.append(metrics.route_balance)
+        self._cost_buf.append(metrics.current_cost)
+
+        if len(self._balance_buf) < 2:
+            return weights
+
+        balances = list(self._balance_buf)
+        fairness_delta = sum(
+            abs(balances[i] - balances[i - 1]) for i in range(1, len(balances))
+        ) / (len(balances) - 1)
+
+        costs = list(self._cost_buf)
+        cost_growth = sum(
+            costs[i] - costs[i - 1] for i in range(1, len(costs))
+        ) / (len(costs) - 1)
+
+        if fairness_delta < self._epsilon and cost_growth < self._cost_budget:
+            return ObjectiveWeights(
+                vehicle_count=weights.vehicle_count,
+                route_balance=self._clip(weights.route_balance * self._boost),
+                dist=weights.dist,
+                time=weights.time,
+            )
+
+        if cost_growth > self._cost_budget:
+            return ObjectiveWeights(
+                vehicle_count=self._clip(weights.vehicle_count * self._decay),
+                route_balance=self._clip(weights.route_balance * self._decay),
+                dist=self._clip(weights.dist * self._decay),
+                time=self._clip(weights.time * self._decay),
+            )
+
+        return weights
+
+
 class AdaptiveObjective:
     """
     Manages adaptive objective weights inside the iterated local search.
@@ -262,10 +288,11 @@ class AdaptiveObjective:
 
         self._strategy = strategy
         self._update_every = max(1, update_every)
-        self._history: list[bool] = []
+        self._history: deque[bool] = deque(maxlen=history_window)
         self._history_window = history_window
         self._iteration = 0
         self._metrics_log: list[IterationMetrics] = []
+        self._weight_applied_count: int = 0
 
     @property
     def weights(self) -> ObjectiveWeights:
@@ -275,7 +302,25 @@ class AdaptiveObjective:
     def iteration(self) -> int:
         return self._iteration
 
-    def evaluate(self, solution: Solution) -> float:
+    @property
+    def weight_applied_count(self) -> int:
+        return self._weight_applied_count
+
+    def fairness_delta_ma(self, k: int = 10) -> float:
+        """Mean absolute change of ``route_balance`` over the last *k* iterations."""
+        log = self._metrics_log
+        if len(log) < 2:
+            return 0.0
+        recent = log[-k:]
+        if len(recent) < 2:
+            return 0.0
+        deltas = [
+            abs(recent[i].route_balance - recent[i - 1].route_balance)
+            for i in range(1, len(recent))
+        ]
+        return sum(deltas) / len(deltas)
+
+    def evaluate(self, solution: "Solution") -> float:
         """Return the custom-weighted contribution for *solution*."""
         w = self._weights
         value = 0.0
@@ -323,17 +368,22 @@ class AdaptiveObjective:
 
     def _on_iteration(
         self,
-        current: Solution,
-        candidate: Solution,
-        best: Solution,
-        cost_evaluator: CostEvaluator,
+        current: "Solution",
+        candidate: "Solution",
+        best: "Solution",
+        cost_evaluator: "CostEvaluator",
     ) -> None:
         self._iteration += 1
 
         self._history.append(candidate.is_feasible())
-        if len(self._history) > self._history_window:
-            self._history.pop(0)
         feasibility_rate = sum(self._history) / len(self._history)
+
+        routes = current.routes()
+        per_route_clients = [r.num_clients() for r in routes]
+        per_route_distances = [float(r.distance()) for r in routes]
+        per_route_loads = [
+            [float(v) for v in r.delivery()] for r in routes
+        ]
 
         metrics = IterationMetrics(
             iteration=self._iteration,
@@ -346,6 +396,9 @@ class AdaptiveObjective:
             route_balance=current.route_balance(),
             time_window_violation=current.time_window_violation(),
             weights=ObjectiveWeights(*self._weights.as_tuple()),
+            per_route_clients=per_route_clients,
+            per_route_distances=per_route_distances,
+            per_route_loads=per_route_loads,
         )
         self._metrics_log.append(metrics)
 
@@ -354,7 +407,6 @@ class AdaptiveObjective:
             and self._iteration % self._update_every == 0
         ):
             self._weights = self._strategy.update(self._weights, metrics)
-            self._weights.apply_to(cost_evaluator)
 
     def as_callback(self) -> "IteratedLocalSearchCallbacks":
         from pyvrp.IteratedLocalSearch import IteratedLocalSearchCallbacks
@@ -362,18 +414,29 @@ class AdaptiveObjective:
         obj = self
 
         class _Callback(IteratedLocalSearchCallbacks):
+            def __init__(self) -> None:
+                self._pm: "PenaltyManager | None" = None
+
+            def on_setup(self, pm: "PenaltyManager") -> None:
+                self._pm = pm
+                pm.set_custom_weights(obj._weights)
+                obj._weight_applied_count += 1
+
             def on_iteration(
                 self,
-                current: Solution,
-                candidate: Solution,
-                best: Solution,
-                cost_evaluator: CostEvaluator,
+                current: "Solution",
+                candidate: "Solution",
+                best: "Solution",
+                cost_evaluator: "CostEvaluator",
             ) -> None:
-                if obj._iteration == 0:
-                    obj._weights.apply_to(cost_evaluator)
+                prev_weights = obj._weights.as_tuple()
                 obj._on_iteration(current, candidate, best, cost_evaluator)
+                if self._pm is not None:
+                    self._pm.set_custom_weights(obj._weights)
+                    if obj._weights.as_tuple() != prev_weights:
+                        obj._weight_applied_count += 1
 
-            def on_restart(self, best: Solution) -> None:  # type: ignore[override]
+            def on_restart(self, best: "Solution") -> None:  # type: ignore[override]
                 obj._history.clear()
 
         return _Callback()
