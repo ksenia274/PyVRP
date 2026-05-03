@@ -356,20 +356,13 @@ Cost pyvrp::CostEvaluator::penalisedCost(Solution const &solution) const
     for (auto const &route : solution.routes())
         cost += penalisedCost(route);
 
-    // Custom objective terms — all zero by default (backward compatible).
-    auto const [vcw, rbw, dw, tw] = getWeights();
+    auto const [vcw, rbw] = getWeights();
 
     if (vcw > 0.0)
         cost += static_cast<Cost>(vcw * static_cast<double>(solution.numRoutes()));
 
     if (rbw > 0.0)
         cost += static_cast<Cost>(rbw * solution.routeBalance());
-
-    if (dw > 0.0)
-        cost += static_cast<Cost>(dw * static_cast<double>(solution.distance().get()));
-
-    if (tw > 0.0)
-        cost += static_cast<Cost>(tw * static_cast<double>(solution.duration().get()));
 
     return cost;
 }
