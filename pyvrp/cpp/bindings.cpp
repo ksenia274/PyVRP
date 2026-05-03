@@ -1017,15 +1017,12 @@ PYBIND11_MODULE(_pyvrp, m)
              });
 
     py::class_<CostEvaluator>(m, "CostEvaluator", DOC(pyvrp, CostEvaluator))
-        .def(py::init<std::vector<double>, double, double, double, double,
-                      double, double>(),
+        .def(py::init<std::vector<double>, double, double, double, double>(),
              py::arg("load_penalties"),
              py::arg("tw_penalty"),
              py::arg("dist_penalty"),
              py::arg("vehicle_count_weight") = 0.0,
-             py::arg("route_balance_weight") = 0.0,
-             py::arg("dist_weight") = 0.0,
-             py::arg("time_weight") = 0.0)
+             py::arg("route_balance_weight") = 0.0)
         .def("load_penalty",
              &CostEvaluator::loadPenalty,
              py::arg("load"),
@@ -1053,8 +1050,6 @@ PYBIND11_MODULE(_pyvrp, m)
              &CostEvaluator::setWeights,
              py::arg("vehicle_count_weight"),
              py::arg("route_balance_weight"),
-             py::arg("dist_weight"),
-             py::arg("time_weight"),
              DOC(pyvrp, CostEvaluator, setWeights))
         .def("get_weights",
              &CostEvaluator::getWeights,

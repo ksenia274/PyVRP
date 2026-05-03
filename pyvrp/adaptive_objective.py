@@ -14,48 +14,24 @@ if TYPE_CHECKING:
 
 @dataclass
 class ObjectiveWeights:
-    """
-    Custom objective weights (additive on top of base cost, all >= 0).
-
-    Parameters
-    ----------
-    vehicle_count
-        Penalty per route used.
-    route_balance
-        Penalty proportional to the coefficient of variation of clients per
-        route.
-    dist
-        Extra cost per unit of raw distance.
-    time
-        Extra cost per unit of raw duration.
-    """
 
     vehicle_count: float = 0.0
     route_balance: float = 0.0
-    dist: float = 0.0
-    time: float = 0.0
 
     def __post_init__(self) -> None:
-        for name in ("vehicle_count", "route_balance", "dist", "time"):
+        for name in ("vehicle_count", "route_balance"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0.")
 
-    def as_tuple(self) -> tuple[float, float, float, float]:
-        return (self.vehicle_count, self.route_balance, self.dist, self.time)
+    def as_tuple(self) -> tuple[float, float]:
+        return (self.vehicle_count, self.route_balance)
 
     def apply_to(self, cost_evaluator: "CostEvaluator") -> None:
-        cost_evaluator.set_weights(
-            self.vehicle_count,
-            self.route_balance,
-            self.dist,
-            self.time,
-        )
+        cost_evaluator.set_weights(self.vehicle_count, self.route_balance)
 
 
 @dataclass
 class IterationMetrics:
-    """Per-iteration snapshot passed to adaptation strategies."""
-
     iteration: int
     current_cost: int
     best_cost: int
@@ -82,16 +58,7 @@ class AdaptationStrategy(ABC):
 
 
 class LinearDecay(AdaptationStrategy):
-    """
-    Multiplies all weights by ``decay`` each iteration.
-
-    Parameters
-    ----------
-    decay
-        Multiplicative factor in (0, 1]. Default 0.9999.
-    min_weight
-        Floor value; weights are never reduced below this. Default 0.0.
-    """
+    """Multiplies all weights by `decay` each iteration, clamped at `min_weight`."""
 
     def __init__(self, decay: float = 0.9999, min_weight: float = 0.0):
         if not (0 < decay <= 1):
@@ -110,78 +77,11 @@ class LinearDecay(AdaptationStrategy):
         return ObjectiveWeights(
             vehicle_count=_d(weights.vehicle_count),
             route_balance=_d(weights.route_balance),
-            dist=_d(weights.dist),
-            time=_d(weights.time),
-        )
-
-
-class MultiObjectiveScalarization(AdaptationStrategy):
-    """
-    Periodically resamples weights uniformly from the unit simplex to
-    approximate Pareto front exploration.
-
-    Parameters
-    ----------
-    objectives
-        Which weights to randomise. Valid: ``"vehicle_count"``,
-        ``"route_balance"``, ``"dist"``, ``"time"``.
-        Default: ``["vehicle_count", "route_balance"]``.
-    scale
-        Overall scale factor for drawn weights. Default 1000.0.
-    update_interval
-        Iterations between resamples. Default 500.
-    rng_seed
-        Optional seed. Default ``None``.
-    """
-
-    _VALID = frozenset({"vehicle_count", "route_balance", "dist", "time"})
-
-    def __init__(
-        self,
-        objectives: list[str] | None = None,
-        scale: float = 1000.0,
-        update_interval: int = 500,
-        rng_seed: int | None = None,
-    ):
-        import random
-
-        self._objectives = objectives or ["vehicle_count", "route_balance"]
-        for obj in self._objectives:
-            if obj not in self._VALID:
-                raise ValueError(
-                    f"Unknown objective '{obj}'. Valid: {sorted(self._VALID)}."
-                )
-        self._scale = scale
-        self._interval = update_interval
-        self._rng = random.Random(rng_seed)
-
-    def update(
-        self, weights: ObjectiveWeights, metrics: IterationMetrics
-    ) -> ObjectiveWeights:
-        if metrics.iteration % self._interval != 0:
-            return weights
-
-        n = len(self._objectives)
-        raw = [self._rng.expovariate(1.0) for _ in range(n)]
-        total = sum(raw)
-        new_vals = {
-            obj: (v / total) * self._scale
-            for obj, v in zip(self._objectives, raw)
-        }
-
-        return ObjectiveWeights(
-            vehicle_count=new_vals.get("vehicle_count", weights.vehicle_count),
-            route_balance=new_vals.get("route_balance", weights.route_balance),
-            dist=new_vals.get("dist", weights.dist),
-            time=new_vals.get("time", weights.time),
         )
 
 
 class FairnessSignalAdjustment(AdaptationStrategy):
-    """
-    Boosts route_balance weight when fairness is stable and cost is not
-    growing; decays all weights when cost growth exceeds cost_budget.
-    """
+    """Boosts `route_balance` when fairness is stable, decays all weights when cost grows."""
 
     def __init__(
         self,
@@ -239,38 +139,18 @@ class FairnessSignalAdjustment(AdaptationStrategy):
             return ObjectiveWeights(
                 vehicle_count=weights.vehicle_count,
                 route_balance=self._clip(weights.route_balance * self._boost),
-                dist=weights.dist,
-                time=weights.time,
             )
 
         if cost_growth > self._cost_budget:
             return ObjectiveWeights(
                 vehicle_count=self._clip(weights.vehicle_count * self._decay),
                 route_balance=self._clip(weights.route_balance * self._decay),
-                dist=self._clip(weights.dist * self._decay),
-                time=self._clip(weights.time * self._decay),
             )
 
         return weights
 
 
 class AdaptiveObjective:
-    """
-    Manages adaptive objective weights inside the iterated local search.
-
-    Parameters
-    ----------
-    initial_weights
-        Starting weights. Can be :class:`ObjectiveWeights` or a dict with
-        any subset of keys ``{"vehicle_count", "route_balance", "dist",
-        "time"}``.
-    strategy
-        Adaptation strategy. ``None`` keeps weights fixed.
-    update_every
-        Iterations between strategy calls. Default 1.
-    history_window
-        Window size for the rolling feasibility rate. Default 100.
-    """
 
     def __init__(
         self,
@@ -307,7 +187,7 @@ class AdaptiveObjective:
         return self._weight_applied_count
 
     def fairness_delta_ma(self, k: int = 10) -> float:
-        """Mean absolute change of ``route_balance`` over the last *k* iterations."""
+        """Mean absolute change of `route_balance` over the last k iterations."""
         log = self._metrics_log
         if len(log) < 2:
             return 0.0
@@ -321,24 +201,18 @@ class AdaptiveObjective:
         return sum(deltas) / len(deltas)
 
     def evaluate(self, solution: "Solution") -> float:
-        """Return the custom-weighted contribution for *solution*."""
         w = self._weights
         value = 0.0
         if w.vehicle_count:
             value += w.vehicle_count * solution.num_routes()
         if w.route_balance:
             value += w.route_balance * solution.route_balance()
-        if w.dist:
-            value += w.dist * solution.distance()
-        if w.time:
-            value += w.time * solution.duration()
         return value
 
     def get_history(self) -> list[IterationMetrics]:
         return list(self._metrics_log)
 
     def get_history_dataframe(self) -> "pd.DataFrame":
-        """Return iteration history as a ``pandas.DataFrame``."""
         try:
             import pandas as pd
         except ImportError as exc:
@@ -359,8 +233,6 @@ class AdaptiveObjective:
                 "time_window_violation": m.time_window_violation,
                 "weight_vehicle_count": m.weights.vehicle_count,
                 "weight_route_balance": m.weights.route_balance,
-                "weight_dist": m.weights.dist,
-                "weight_time": m.weights.time,
             }
             for m in self._metrics_log
         ]
@@ -436,7 +308,7 @@ class AdaptiveObjective:
                     if obj._weights.as_tuple() != prev_weights:
                         obj._weight_applied_count += 1
 
-            def on_restart(self, best: "Solution") -> None:  # type: ignore[override]
+            def on_restart(self, best: "Solution") -> None:
                 obj._history.clear()
 
         return _Callback()

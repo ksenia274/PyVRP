@@ -172,9 +172,7 @@ class PenaltyManager:
             [] for _ in range(len(self._penalties))
         ]
 
-        self._custom_weights: tuple[float, float, float, float] = (
-            0.0, 0.0, 0.0, 0.0
-        )
+        self._custom_weights: tuple[float, float] = (0.0, 0.0)
 
     def set_custom_weights(self, weights: "ObjectiveWeights") -> None:
         self._custom_weights = weights.as_tuple()
@@ -256,4 +254,4 @@ class PenaltyManager:
         """
         penalties = np.full_like(self._penalties, self._params.max_penalty)
         *loads, tw, dist = penalties
-        return CostEvaluator(loads, tw, dist)
+        return CostEvaluator(loads, tw, dist, *self._custom_weights)
