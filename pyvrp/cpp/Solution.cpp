@@ -117,24 +117,20 @@ Duration Solution::timeWarp() const { return timeWarp_; }
 
 double Solution::routeBalance() const
 {
-    if (routes_.size() <= 1)
+    if (routes_.empty())
         return 0.0;
 
-    double mean = static_cast<double>(numClients_)
-                  / static_cast<double>(routes_.size());
-
-    if (mean == 0.0)
-        return 0.0;
-
-    double variance = 0.0;
+    double totalDist = 0.0;
     for (auto const &route : routes_)
-    {
-        double diff = static_cast<double>(route.numClients()) - mean;
-        variance += diff * diff;
-    }
-    variance /= static_cast<double>(routes_.size());
+        totalDist += static_cast<double>(route.distance().get());
 
-    return std::sqrt(variance) / mean;
+    double const mean = totalDist / static_cast<double>(routes_.size());
+
+    double mad = 0.0;
+    for (auto const &route : routes_)
+        mad += std::abs(static_cast<double>(route.distance().get()) - mean);
+
+    return mad / static_cast<double>(routes_.size());
 }
 
 double Solution::timeWindowViolation() const
@@ -359,10 +355,18 @@ Cost pyvrp::CostEvaluator::penalisedCost(Solution const &solution) const
     auto const [vcw, rbw] = getWeights();
 
     if (vcw > 0.0)
-        cost += static_cast<Cost>(vcw * static_cast<double>(solution.numRoutes()));
+        cost += static_cast<Cost>(
+            std::llround(vcw * static_cast<double>(solution.numRoutes())));
 
     if (rbw > 0.0)
-        cost += static_cast<Cost>(rbw * solution.routeBalance());
+    {
+        double const target = targetRouteDist();
+        double penalty = 0.0;
+        for (auto const &route : solution.routes())
+            penalty += std::abs(
+                static_cast<double>(route.distance().get()) - target);
+        cost += static_cast<Cost>(std::llround(rbw * penalty));
+    }
 
     return cost;
 }

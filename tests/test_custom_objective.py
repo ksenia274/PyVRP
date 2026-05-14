@@ -87,7 +87,7 @@ def test_route_balance_empty_solution(ok_small):
 
 def test_route_balance_equal_routes(ok_small):
     sol = Solution(ok_small, [[0, 1], [2, 3]])
-    assert_equal(sol.route_balance(), 0.0)
+    assert_equal(sol.route_balance(), 638.5)
 
 def test_route_balance_unequal_routes(ok_small):
     sol = Solution(ok_small, [[0, 1, 2], [3]])

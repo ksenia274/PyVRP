@@ -4,6 +4,7 @@
 #include "Measure.h"
 
 #include <cassert>
+#include <cmath>
 #include <concepts>
 #include <limits>
 #include <tuple>
@@ -18,6 +19,7 @@ template <typename T>
 concept DeltaCostEvaluatable = requires(T arg, size_t dimension) {
     { arg.route() };
     { arg.distance() } -> std::convertible_to<std::pair<Cost, Distance>>;
+    { arg.rawDistance() } -> std::same_as<Distance>;
     { arg.duration() } -> std::convertible_to<std::pair<Cost, Duration>>;
     { arg.excessLoad(dimension) } -> std::same_as<Load>;
 };
@@ -58,6 +60,7 @@ class CostEvaluator
 
     double vehicleCountWeight_ = 0.0;
     double routeBalanceWeight_ = 0.0;
+    double targetRouteDist_ = 0.0;
 
     /**
      * Computes the cost penalty incurred from the given excess loads. This is
@@ -82,6 +85,9 @@ public:
      * Returns (vehicleCountWeight, routeBalanceWeight).
      */
     [[nodiscard]] std::tuple<double, double> getWeights() const;
+
+    void setTargetRouteDist(double target) { targetRouteDist_ = target; }
+    [[nodiscard]] double targetRouteDist() const { return targetRouteDist_; }
 
     /**
      * Computes the total excess load penalty for the given load and vehicle
@@ -254,6 +260,18 @@ bool CostEvaluator::deltaCost(Cost &out, T<Args...> const &proposal) const
         out += excessDistPenalty(excess);
     }
 
+    if (routeBalanceWeight_ > 0.0)
+    {
+        double const oldDist
+            = static_cast<double>(route->distance().get());
+        double const newDist
+            = static_cast<double>(proposal.rawDistance().get());
+        double const oldDev = std::abs(oldDist - targetRouteDist_);
+        double const newDev = std::abs(newDist - targetRouteDist_);
+        out += static_cast<Cost>(
+            std::llround(routeBalanceWeight_ * (newDev - oldDev)));
+    }
+
     auto const &capacity = route->capacity();
     for (size_t dim = 0; dim != capacity.size(); ++dim)
     {
@@ -321,6 +339,27 @@ bool CostEvaluator::deltaCost(Cost &out,
         auto const [cost, excess] = vProposal.distance();
         out += cost;
         out += excessDistPenalty(excess);
+    }
+
+    if (routeBalanceWeight_ > 0.0)
+    {
+        double const uOldDist
+            = static_cast<double>(uRoute->distance().get());
+        double const uNewDist
+            = static_cast<double>(uProposal.rawDistance().get());
+        double const vOldDist
+            = static_cast<double>(vRoute->distance().get());
+        double const vNewDist
+            = static_cast<double>(vProposal.rawDistance().get());
+
+        double const uOldDev = std::abs(uOldDist - targetRouteDist_);
+        double const uNewDev = std::abs(uNewDist - targetRouteDist_);
+        double const vOldDev = std::abs(vOldDist - targetRouteDist_);
+        double const vNewDev = std::abs(vNewDist - targetRouteDist_);
+
+        out += static_cast<Cost>(std::llround(
+            routeBalanceWeight_
+            * ((uNewDev - uOldDev) + (vNewDev - vOldDev))));
     }
 
     auto const &uCapacity = uRoute->capacity();

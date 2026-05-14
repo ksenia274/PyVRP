@@ -173,9 +173,13 @@ class PenaltyManager:
         ]
 
         self._custom_weights: tuple[float, float] = (0.0, 0.0)
+        self._target_route_dist: float = 0.0
 
     def set_custom_weights(self, weights: "ObjectiveWeights") -> None:
         self._custom_weights = weights.as_tuple()
+
+    def set_target_route_dist(self, target: float) -> None:
+        self._target_route_dist = float(target)
 
     def penalties(self) -> tuple[list[float], float, float]:
         """
@@ -246,7 +250,9 @@ class PenaltyManager:
         Get a cost evaluator using the current penalty values.
         """
         *loads, tw, dist = self._penalties
-        return CostEvaluator(loads, tw, dist, *self._custom_weights)
+        ce = CostEvaluator(loads, tw, dist, *self._custom_weights)
+        ce.set_target_route_dist(self._target_route_dist)
+        return ce
 
     def max_cost_evaluator(self) -> CostEvaluator:
         """
@@ -254,4 +260,6 @@ class PenaltyManager:
         """
         penalties = np.full_like(self._penalties, self._params.max_penalty)
         *loads, tw, dist = penalties
-        return CostEvaluator(loads, tw, dist, *self._custom_weights)
+        ce = CostEvaluator(loads, tw, dist, *self._custom_weights)
+        ce.set_target_route_dist(self._target_route_dist)
+        return ce

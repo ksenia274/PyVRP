@@ -117,6 +117,11 @@ public:
         std::pair<Cost, Distance> distance() const;
 
         /**
+         * Returns the raw total distance of the proposed route.
+         */
+        Distance rawDistance() const;
+
+        /**
          * Returns the (duration cost, time warp) attributes of the proposed
          * route.
          */
@@ -1123,6 +1128,38 @@ std::pair<Cost, Distance> Route::Proposal<Segments...>::distance() const
         auto const excess = std::max<Distance>(distance - maxDistance, 0);
         auto const cost = unitDistanceCost * static_cast<Cost>(distance);
         return std::make_pair(cost, excess);
+    };
+
+    return std::apply(fn, segments_);
+}
+
+template <Segment... Segments>
+Distance Route::Proposal<Segments...>::rawDistance() const
+{
+    if (empty())
+        return 0;
+
+    auto const &data = route()->data;
+    auto const profile = route()->profile();
+    auto const &matrix = data.distanceMatrix(profile);
+
+    auto const fn = [&](auto &&segment, auto &&...args)
+    {
+        auto distance = segment.distance(profile);
+        auto lastLoc = segment.back().location();
+
+        auto const merge = [&](auto const &self, auto &&other, auto &&...args)
+        {
+            distance += matrix(lastLoc, other.front().location());
+            distance += other.distance(profile);
+            lastLoc = other.back().location();
+
+            if constexpr (sizeof...(args) != 0)
+                self(self, std::forward<decltype(args)>(args)...);
+        };
+
+        merge(merge, std::forward<decltype(args)>(args)...);
+        return distance;
     };
 
     return std::apply(fn, segments_);

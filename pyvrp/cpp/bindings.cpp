@@ -1053,7 +1053,11 @@ PYBIND11_MODULE(_pyvrp, m)
              DOC(pyvrp, CostEvaluator, setWeights))
         .def("get_weights",
              &CostEvaluator::getWeights,
-             DOC(pyvrp, CostEvaluator, getWeights));
+             DOC(pyvrp, CostEvaluator, getWeights))
+        .def("set_target_route_dist",
+             &CostEvaluator::setTargetRouteDist,
+             py::arg("target"))
+        .def("target_route_dist", &CostEvaluator::targetRouteDist);
 
     py::class_<LoadSegment>(m, "LoadSegment", DOC(pyvrp, LoadSegment))
         .def(py::init<pyvrp::Load, pyvrp::Load, pyvrp::Load, pyvrp::Load>(),
