@@ -9,7 +9,7 @@ Two custom solution-level weights in `CostEvaluator`:
 
 - `vehicle_count` — additive penalty per route in the solution.
 - `route_balance` — additive penalty proportional to imbalance across routes
-  (coefficient of variation of clients-per-route: stddev / mean).
+  (mean absolute deviation of route distances from their mean: `Σ|d_i - d̄| / n`).
 
 A Python-side adaptation system in `pyvrp/adaptive_objective.py`:
 
@@ -21,11 +21,12 @@ A Python-side adaptation system in `pyvrp/adaptive_objective.py`:
 - `AdaptiveObjective` — coordinator that wires a strategy to the ILS via
   callbacks.
 
-A small extension to `PenaltyManager` to persist custom weights across the
-internal `CostEvaluator` re-creations that happen each iteration.
+A small extension to `PenaltyManager` to persist custom weights and the
+route-distance target across the internal `CostEvaluator` re-creations that
+happen each iteration.
 
-A `Solution.route_balance()` method returning the coefficient of variation
-(`stddev / mean`) of clients-per-route, and a `Solution.time_window_violation()` accessor.
+A `Solution.route_balance()` method returning the mean absolute deviation of
+route distances, and a `Solution.time_window_violation()` accessor.
 
 ## Installation
 
@@ -74,18 +75,26 @@ A complete example: [`examples/adaptive_vrp.py`](examples/adaptive_vrp.py).
 
 ## How weights work
 
-Weights are applied in `penalisedCost<Solution>` — the function that scores
-a candidate solution at the end of each ILS iteration. They influence which
-candidate the iterated local search accepts.
+`vehicle_count` is applied in `penalisedCost<Solution>` — the function that
+scores a candidate solution at the end of each ILS iteration.
 
-Weights are not visible to the local search operators (2-opt, relocate, swap),
-which use incremental `deltaCost` and bypass the full solution cost. This
-means weights bias the *acceptance* step of ILS, not the *internal moves*.
+`route_balance` uses a decomposable MAD proxy: the penalty `Σ|d_i - target|`
+is additive per route, so the incremental cost of a local-search move is
+`rbw * (|new_dist - target| - |old_dist - target|)`. This delta is computed
+inside `CostEvaluator::deltaCost`, making the balance signal visible to all
+local-search operators (2-opt, relocate, swap, etc.), not just the acceptance
+step.
+
+The target distance is a snapshot of the current-solution mean route distance
+taken at the start of each ILS iteration. It is stored in `CostEvaluator` via
+`set_target_route_dist` and updated by `AdaptiveObjective` callbacks
+(`on_start`, `on_iteration`, `on_restart`).
 
 The weights live in `PenaltyManager` rather than directly in `CostEvaluator`
 because PyVRP re-creates the `CostEvaluator` on every iteration to update
-penalty coefficients. `PenaltyManager.set_custom_weights()` persists the
-weights across these re-creations.
+penalty coefficients. `PenaltyManager.set_custom_weights()` and
+`PenaltyManager.set_target_route_dist()` persist these values across
+re-creations.
 
 ## Writing your own strategy
 
@@ -124,10 +133,16 @@ per-route distances and loads. Use any of these to drive your weight updates.
 ## Differences from upstream
 
 - New file: `pyvrp/adaptive_objective.py`.
-- `CostEvaluator`: two extra weight fields, `set_weights()`, `get_weights()`.
-- `Solution`: `route_balance()`, `time_window_violation()`.
-- `PenaltyManager`: `set_custom_weights()`, custom-weight pass-through in
-  both `cost_evaluator()` and `max_cost_evaluator()`.
+- `CostEvaluator`: extra weight fields `vehicleCountWeight_`,
+  `routeBalanceWeight_`, `targetRouteDist_`; methods `set_weights()`,
+  `get_weights()`, `set_target_route_dist()`, `target_route_dist()`;
+  MAD balance delta wired into both `deltaCost` overloads.
+- `Route::Proposal`: new `rawDistance()` method (required by `deltaCost`
+  to compute the balance delta without the cost/excess split).
+- `Solution`: `route_balance()` returns mean absolute deviation of route
+  distances (not CV by clients); `time_window_violation()` accessor.
+- `PenaltyManager`: `set_custom_weights()`, `set_target_route_dist()`,
+  pass-through in both `cost_evaluator()` and `max_cost_evaluator()`.
 - `IteratedLocalSearch`: `callbacks` field in `ILSParams`.
 - `pyvrp.__init__`: exports `AdaptiveObjective`, `AdaptationStrategy`,
   `ObjectiveWeights`, `IterationMetrics`, `LinearDecay`,
