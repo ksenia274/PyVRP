@@ -285,6 +285,13 @@ class AdaptiveObjective:
 
         obj = self
 
+        def _target(sol: "Solution") -> float:
+            n = sol.num_routes()
+            if n <= 0:
+                return 0.0
+            total = sum(float(r.distance()) for r in sol.routes())
+            return total / n
+
         class _Callback(IteratedLocalSearchCallbacks):
             def __init__(self) -> None:
                 self._pm: "PenaltyManager | None" = None
@@ -293,6 +300,10 @@ class AdaptiveObjective:
                 self._pm = pm
                 pm.set_custom_weights(obj._weights)
                 obj._weight_applied_count += 1
+
+            def on_start(self, initial: "Solution") -> None:
+                if self._pm is not None:
+                    self._pm.set_target_route_dist(_target(initial))
 
             def on_iteration(
                 self,
@@ -307,8 +318,11 @@ class AdaptiveObjective:
                     self._pm.set_custom_weights(obj._weights)
                     if obj._weights.as_tuple() != prev_weights:
                         obj._weight_applied_count += 1
+                    self._pm.set_target_route_dist(_target(current))
 
             def on_restart(self, best: "Solution") -> None:
                 obj._history.clear()
+                if self._pm is not None:
+                    self._pm.set_target_route_dist(_target(best))
 
         return _Callback()
